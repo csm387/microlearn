@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f9f6">
+  <meta name="description" content="Microeconomie explicată simplu: lecții, formule, grafice interactive și grile din materialele de curs.">
+  <title>Microlearn — Microeconomie pe înțelesul tău</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="data.js" defer></script>
+  <script src="seminar-data.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-layout">
+    <aside class="sidebar" id="sidebar" aria-label="Navigație principală">
+      <div class="sidebar-inner">
+        <a class="brand" href="#acasa" aria-label="Microlearn, pagina principală">
+          <span class="brand-mark" aria-hidden="true">m<span>.</span></span>
+          <span class="brand-name">microlearn<span class="brand-sub">/ economie, clar.</span></span>
+        </a>
+        <div class="sidebar-label">SPAȚIUL TĂU DE ÎNVĂȚARE</div>
+        <nav class="main-nav" aria-label="Secțiuni">
+          <a class="nav-link" href="#acasa" data-nav="acasa"><span class="nav-symbol">▦</span> Acasă</a>
+          <a class="nav-link" href="#lectii" data-nav="lectii"><span class="nav-symbol">▤</span> Lecții de curs</a>
+          <a class="nav-link" href="#seminar" data-nav="seminar"><span class="nav-symbol">✎</span> Seminar</a>
+          <a class="nav-link" href="#formule" data-nav="formule"><span class="nav-symbol">ƒ</span> Formule & fișe</a>
+          <a class="nav-link" href="#teste" data-nav="teste"><span class="nav-symbol">◉</span> Exersează</a>
+        </nav>
+        <div class="sidebar-label mt">CAPITOLE</div>
+        <nav class="chapter-nav" id="chapterNav" aria-label="Capitole"></nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-progress"><div class="sidebar-progress-top"><span>Progresul tău</span><strong id="sideProgress">0%</strong></div><div class="track"><span id="sideProgressBar"></span></div><small>Salvat automat pe acest dispozitiv.</small></div>
+          <div class="sidebar-meta">Fără cont · Fără reclame · 100% static</div>
+        </div>
+      </div>
+    </aside>
+    <div class="mobile-overlay" id="mobileOverlay" hidden></div>
+    <div class="workspace">
+      <header class="topbar">
+        <button class="icon-btn menu-toggle" id="menuToggle" type="button" aria-label="Deschide meniul" aria-expanded="false">☰</button>
+        <div class="topbar-context"><span class="live-dot"></span> MICROECONOMIE / <span id="headerContext">ACASĂ</span></div>
+        <div class="topbar-actions"><span class="topbar-subtle">Învață în ritmul tău</span><button class="icon-btn theme-toggle" id="themeToggle" type="button" aria-label="Schimbă tema" title="Schimbă tema">☾</button></div>
+      </header>
+      <main id="app" class="main-content" tabindex="-1"></main>
+      <footer class="footer"><span>Din materialele tale de curs și seminar.</span><button type="button" id="sourcesButton" class="text-button">Despre surse <span aria-hidden="true">↗</span></button></footer>
+    </div>
+  </div>
+  <dialog id="sourceDialog" aria-labelledby="sourcesTitle"><div class="dialog-top"><h2 id="sourcesTitle">Materiale folosite</h2><button class="icon-btn" id="closeSources" type="button" aria-label="Închide">✕</button></div><div id="sourcesList"></div><p class="dialog-fine">Lecțiile sunt sinteze, nu reproduceri integrale. Întrebările din colecția de grile păstrează răspunsurile identificabile în documentul corectat; autoevaluarea de seminar este indicată separat. Întrebările adaptate sunt etichetate. O neconcordanță a baremului de autoevaluare este explicată în secțiunea „Utilitate · aplicații”.</p></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
