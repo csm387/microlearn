@@ -1,0 +1,11 @@
+{
+  "name": "Microlearn — microeconomie",
+  "short_name": "Microlearn",
+  "description": "Curs și seminar de microeconomie, cu formule și exerciții.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f8f5",
+  "theme_color": "#174534",
+  "icons": [ {"src":"./favicon.svg", "sizes":"any", "type":"image/svg+xml", "purpose":"any"} ]
+}

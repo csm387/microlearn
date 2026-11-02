@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f8f9f6">
-  <meta name="description" content="Microeconomie explicată simplu: lecții, formule, grafice interactive și grile din materialele de curs.">
+  <meta name="description" content="Învață microeconomie din curs și seminar: lecții, formule, probleme, grafice, grile și notițe. Site static pentru GitHub Pages.">
   <title>Microlearn — Microeconomie pe înțelesul tău</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="style.css">
   <script src="data.js" defer></script>
   <script src="seminar-data.js" defer></script>
@@ -25,8 +26,10 @@
           <a class="nav-link" href="#acasa" data-nav="acasa"><span class="nav-symbol">▦</span> Acasă</a>
           <a class="nav-link" href="#lectii" data-nav="lectii"><span class="nav-symbol">▤</span> Lecții de curs</a>
           <a class="nav-link" href="#seminar" data-nav="seminar"><span class="nav-symbol">✎</span> Seminar</a>
+          <a class="nav-link" href="#laborator" data-nav="laborator"><span class="nav-symbol">⌁</span> Laborator</a>
           <a class="nav-link" href="#formule" data-nav="formule"><span class="nav-symbol">ƒ</span> Formule & fișe</a>
           <a class="nav-link" href="#teste" data-nav="teste"><span class="nav-symbol">◉</span> Exersează</a>
+          <a class="nav-link" href="#colectie" data-nav="colectie"><span class="nav-symbol">☆</span> Colecția mea</a>
         </nav>
         <div class="sidebar-label mt">CAPITOLE</div>
         <nav class="chapter-nav" id="chapterNav" aria-label="Capitole"></nav>
@@ -41,13 +44,19 @@
       <header class="topbar">
         <button class="icon-btn menu-toggle" id="menuToggle" type="button" aria-label="Deschide meniul" aria-expanded="false">☰</button>
         <div class="topbar-context"><span class="live-dot"></span> MICROECONOMIE / <span id="headerContext">ACASĂ</span></div>
-        <div class="topbar-actions"><span class="topbar-subtle">Învață în ritmul tău</span><button class="icon-btn theme-toggle" id="themeToggle" type="button" aria-label="Schimbă tema" title="Schimbă tema">☾</button></div>
+        <div class="topbar-actions"><span class="topbar-subtle">Învață în ritmul tău</span><button class="topbar-search" id="searchOpen" type="button" aria-label="Caută în toate materialele" title="Caută în toate materialele (Ctrl+K)"><span aria-hidden="true">⌕</span> <span>Caută</span> <kbd>⌘ K</kbd></button><button class="icon-btn theme-toggle" id="themeToggle" type="button" aria-label="Schimbă tema" title="Schimbă tema">☾</button></div>
       </header>
       <main id="app" class="main-content" tabindex="-1"></main>
-      <footer class="footer"><span>Din materialele tale de curs și seminar.</span><button type="button" id="sourcesButton" class="text-button">Despre surse <span aria-hidden="true">↗</span></button></footer>
+      <footer class="footer"><span>Din materialele tale de curs și seminar. <a href="#colectie" class="footer-saved">Progres și notițe ↗</a></span><button type="button" id="sourcesButton" class="text-button">Despre surse <span aria-hidden="true">↗</span></button></footer>
     </div>
   </div>
   <dialog id="sourceDialog" aria-labelledby="sourcesTitle"><div class="dialog-top"><h2 id="sourcesTitle">Materiale folosite</h2><button class="icon-btn" id="closeSources" type="button" aria-label="Închide">✕</button></div><div id="sourcesList"></div><p class="dialog-fine">Lecțiile sunt sinteze, nu reproduceri integrale. Întrebările din colecția de grile păstrează răspunsurile identificabile în documentul corectat; autoevaluarea de seminar este indicată separat. Întrebările adaptate sunt etichetate. O neconcordanță a baremului de autoevaluare este explicată în secțiunea „Utilitate · aplicații”.</p></dialog>
+  <dialog class="search-dialog" id="searchDialog" aria-labelledby="searchTitle">
+    <div class="search-dialog-title"><h2 id="searchTitle">Caută în Microlearn</h2><button type="button" class="icon-btn" id="searchClose" aria-label="Închide căutarea">✕</button></div>
+    <label class="search-global-input"><span aria-hidden="true">⌕</span><input id="globalSearch" type="search" autocomplete="off" placeholder="Capitol, concept, formulă, exercițiu..." aria-label="Termen de căutare"></label>
+    <div id="globalSearchResults" class="global-search-results" aria-live="polite"></div>
+    <div class="search-dialog-foot">Tastează pentru rezultate · Enter pentru primul rezultat · Esc pentru închidere</div>
+  </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

@@ -8,7 +8,7 @@ const TOTAL_SECTIONS = MODULES.reduce((sum, m) => sum + m.sections.length, 0);
 const root = document.querySelector('#app');
 const storageKey = 'microlearn-v1';
 let state = loadState();
-let quizSession = null;
+let quizSession = (()=>{try{const saved=JSON.parse(sessionStorage.getItem('microlearn-active-quiz')||'null');return saved&&Array.isArray(saved.questions)&&Number.isInteger(saved.index)?saved:null;}catch{return null;}})();
 let flashIndex = 0;
 let flashFlipped = false;
 let formulaQuery = '';
@@ -48,6 +48,8 @@ function render(){
   renderReader(m,s);state.last={module:m.id,section:s.id};saveState();
  }else if(route==='lectii'){active='lectii';context='LECȚII';renderLessons();}
  else if(route==='seminar'){active='seminar';context='SEMINAR';const u=SEMINAR_UNITS.find(x=>x.id===parts[1]);if(u){const sec=u.sections.find(x=>x.id===parts[2])||u.sections[0];renderSeminarReader(u,sec);state.lastSeminar={unit:u.id,section:sec.id};saveState();}else renderSeminarHome();}
+ else if(route==='laborator'){active='laborator';context='LABORATOR';renderLab();}
+ else if(route==='colectie'){active='colectie';context='COLECȚIA MEA';renderCollection();}
  else if(route==='formule'){active='formule';context='FORMULE';formulaMode=parts[1]==='fise'?'fise':'lista';renderFormulas();}
  else if(route==='teste'){active='teste';context='EXERCIȚII';quizSession=null;renderQuizSetup(parts[1]==='seminar'?'seminar':'toate');}
  else if(route==='quiz'){active='teste';context='TEST';if(quizSession)renderQuiz();else{location.hash='teste';return;}}
@@ -223,4 +225,640 @@ function globalClicks(e){const t=e.target.closest('button');if(!t)return;
  switch(t.id){case 'startQuiz':startQuiz();break;case 'nextQuestion':quizSession.index++;renderQuiz();window.scrollTo(0,0);break;case 'retryWrong':retryWrong();break;case 'flipFlash':case 'flipFlashBtn':flashFlipped=!flashFlipped;renderFormulaContent();break;case 'nextFlash':flashIndex=(flashIndex+1)%FORMULAS.length;flashFlipped=false;renderFormulaContent();break;case 'prevFlash':flashIndex=(flashIndex-1+FORMULAS.length)%FORMULAS.length;flashFlipped=false;renderFormulaContent();break;}
 }
 function init(){sidebar();setTheme();window.addEventListener('hashchange',render);document.addEventListener('click',globalClicks);document.addEventListener('change',e=>{if(e.target.id==='quizSource')updateQuizModuleOptions();});$('#menuToggle').addEventListener('click',()=>{const side=$('#sidebar');const on=side.classList.toggle('open');$('#mobileOverlay').hidden=!on;$('#menuToggle').setAttribute('aria-expanded',String(on));});$('#mobileOverlay').addEventListener('click',closeMenu);$('#themeToggle').addEventListener('click',()=>{state.dark=!state.dark;saveState();setTheme();});$('#sourcesButton').addEventListener('click',openSources);$('#closeSources').addEventListener('click',()=>$('#sourceDialog').close());document.addEventListener('input',e=>{if(e.target.id==='formulaSearch'){formulaQuery=e.target.value;refreshFormulaListOnly();}});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu();if(location.hash==='#formule/fise'&&e.code==='Space'&&e.target.tagName!=='BUTTON'&&e.target.tagName!=='INPUT'){e.preventDefault();flashFlipped=!flashFlipped;renderFormulaContent();}});render();}
+
+/* Microlearn 2 — instrumente de învățare. Datele rămân locale și nu se trimit nicăieri. */
+const EXTRAS_KEY='microlearn-extras-v2';
+function loadExtras(){
+ try{const x=JSON.parse(localStorage.getItem(EXTRAS_KEY)||'{}');return {
+  bookmarks:Array.isArray(x.bookmarks)?x.bookmarks:[],
+  favoriteFormulas:Array.isArray(x.favoriteFormulas)?x.favoriteFormulas:[],
+  notes:x.notes&&typeof x.notes==='object'&&!Array.isArray(x.notes)?x.notes:{},
+  missed:Array.isArray(x.missed)?x.missed:[],
+  results:Array.isArray(x.results)?x.results.slice(-30):[]
+ };}catch{return {bookmarks:[],favoriteFormulas:[],notes:{},missed:[],results:[]};}
+}
+let extras=loadExtras();
+function saveExtras(){try{localStorage.setItem(EXTRAS_KEY,JSON.stringify(extras));}catch{toast('Spațiul de stocare este indisponibil.');}}
+const normalizeText=t=>String(t??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const bookmarkName=k=>{
+ const [kind,id,sec]=k.split('/');
+ if(kind==='c'){const m=moduleById(id),s=m?.sections.find(x=>x.id===sec);return m&&s?{title:s.title,sub:m.title,url:secLink(m,s),kind:'Curs'}:null;}
+ const u=SEMINAR_UNITS.find(x=>x.id===id),s=u?.sections.find(x=>x.id===sec);
+ return u&&s?{title:s.title,sub:u.title,url:seminarLink(u,s),kind:'Seminar'}:null;
+};
+function allLessonRecords(){return [...MODULES.flatMap(m=>m.sections.map(s=>({key:`c/${m.id}/${s.id}`,title:s.title,sub:m.title,url:secLink(m,s),kind:'Curs',full:[s.lead,...s.blocks.flatMap(b=>[b.text,b.title,...(b.items||[]),...(b.steps||[])])].filter(Boolean).join(' ')}))),...SEMINAR_UNITS.flatMap(u=>u.sections.map(s=>({key:`s/${u.id}/${s.id}`,title:s.title,sub:u.title,url:seminarLink(u,s),kind:'Seminar',full:[s.lead,...s.blocks.flatMap(b=>[b.text,b.title,...(b.items||[]),...(b.steps||[])])].filter(Boolean).join(' ')})) )];}
+function nextLesson(){
+ const lesson=MODULES.flatMap(m=>m.sections.map(s=>({m,s}))).find(({m,s})=>!state.completed.includes(`${m.id}/${s.id}`));
+ if(lesson)return {url:secLink(lesson.m,lesson.s),name:lesson.s.title,group:lesson.m.title,label:'Următoarea lecție de curs'};
+ const semin=SEMINAR_UNITS.flatMap(u=>u.sections.map(s=>({u,s}))).find(({u,s})=>!state.seminarCompleted.includes(`${u.id}/${s.id}`));
+ return semin?{url:seminarLink(semin.u,semin.s),name:semin.s.title,group:semin.u.title,label:'Următorul seminar'}:null;
+}
+function latestScore(){return extras.results.length?extras.results[extras.results.length-1]:null;}
+function summaryPill(label,value){return `<div class="study-stat"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`;}
+const oldHome=renderHome;
+renderHome=function(){
+ oldHome();
+ const next=nextLesson(),result=latestScore(),done=state.completed.length+state.seminarCompleted.length;
+ const focus=`<section class="focus-panel" aria-label="Plan de studiu"><div class="focus-main"><span class="focus-kicker">PASUL URMĂTOR</span><h2>${next?esc(next.name):'Ai parcurs toate secțiunile!'}</h2><p>${next?esc(next.group)+' · '+esc(next.label):'Poți consolida materia rezolvând câteva grile.'}</p><a class="button" href="${next?next.url:'#teste'}">${next?'Deschide lecția':'Începe recapitularea'} <span aria-hidden="true">→</span></a></div><div class="focus-stats">${summaryPill('secțiuni parcurse',`${done}/${TOTAL_SECTIONS+TOTAL_SEMINAR_SECTIONS}`)}${summaryPill('salvate',extras.bookmarks.length)}${summaryPill('de repetat',extras.missed.length)}${result?summaryPill('ultimul test',result.score+'%'):''}</div></section>`;
+ $('.overview-line')?.insertAdjacentHTML('afterend',focus);
+ const quick=$('.quick-card');if(quick&&extras.missed.length){quick.insertAdjacentHTML('beforeend',`<button type="button" class="text-button compact-extra" data-review-mistakes>Repetă cele ${extras.missed.length} greșite ↗</button>`);}
+};
+
+function quickCheckHtml(q){if(!q)return '';
+ return `<section class="quick-check" aria-label="Verifică ce ai reținut"><div class="quick-check-header"><span class="eyebrow">VERIFICĂ DACĂ AI REȚINUT</span><span class="quiet-tag">1 întrebare</span></div><h3>${esc(q.q)}</h3><div class="quick-check-options" role="group" aria-label="Variante de răspuns">${q.options.map((o,i)=>`<button type="button" data-quick-answer="${i}" data-quick-id="${esc(q.id)}"><span>${'ABCDE'[i]}.</span> ${esc(o)}</button>`).join('')}</div><p class="quick-check-feedback" role="status" aria-live="polite"></p></section>`;
+}
+function insertReaderTools(kind,id,s,sectionIndex){
+ const key=`${kind}/${id}/${s.id}`,saved=extras.bookmarks.includes(key);
+ const label=kind==='c'?'lecție':'secțiune';
+ const tools=`<div class="reader-tools"><span class="reading-caption">${sectionIndex+1} · ${esc(s.title)} <span class="reader-dot">•</span> ${Math.max(2,Math.round((s.blocks.length+2)*1.15))} min de citit</span><button type="button" class="bookmark-button ${saved?'is-saved':''}" data-bookmark="${esc(key)}" aria-pressed="${saved}">${saved?'★ Salvată':'☆ Salvează '+label}</button></div>`;
+ $('.section-tabs')?.insertAdjacentHTML('afterend',tools);
+ const q=CHECKPOINTS[key]||null;
+ const article=$('.reading'),actions=$('.lesson-actions');
+ if(article&&actions){
+  const memo=extras.notes[key]||'';
+  actions.insertAdjacentHTML('beforebegin',`${quickCheckHtml(q)}<details class="study-notes"><summary><span>✎ Notițele mele</span><small>Private, doar în browser</small></summary><label for="noteEditor">Scrie pe scurt ceea ce vrei să reții:</label><textarea id="noteEditor" data-note="${esc(key)}" rows="4" placeholder="O idee, o formulă, o nelămurire...">${esc(memo)}</textarea><p class="notes-hint">Salvare automată pe dispozitiv · poți exporta notițele din „Colecția mea”.</p></details>`);
+ }
+}
+const CHECKPOINTS={
+ "c/raritate/nevoi": {
+  "id": "checkpoint-c-raritate-nevoi",
+  "q": "De ce apare problema rarității?",
+  "options": [
+   "Resursele nu sunt suficiente pentru toate nevoile",
+   "Toate bunurile sunt gratuite",
+   "Nevoile oamenilor sunt identice"
+  ],
+  "answer": 0,
+  "explanation": "Raritatea exprimă insuficiența resurselor în raport cu nevoile."
+ },
+ "c/raritate/resurse": {
+  "id": "checkpoint-c-raritate-resurse",
+  "q": "Care alegere exprimă eficiența economică?",
+  "options": [
+   "Consumarea tuturor resurselor, indiferent de rezultat",
+   "Obținerea unui rezultat maxim dintr-un efort dat",
+   "Renunțarea la orice investiție"
+  ],
+  "answer": 1,
+  "explanation": "Materialul definește eficiența prin rezultate raportate la efort sau invers."
+ },
+ "c/raritate/oportunitate": {
+  "id": "checkpoint-c-raritate-oportunitate",
+  "q": "Ce reprezintă costul de oportunitate?",
+  "options": [
+   "Suma tuturor variantelor respinse",
+   "Taxele plătite pentru varianta aleasă",
+   "Cea mai bună alternativă sacrificată"
+  ],
+  "answer": 2,
+  "explanation": "Se ia în considerare cea mai bună oportunitate pierdută, nu suma tuturor."
+ },
+ "c/raritate/fpp": {
+  "id": "checkpoint-c-raritate-fpp",
+  "q": "Ce indică un punct din interiorul FPP?",
+  "options": [
+   "O combinație imposibilă",
+   "Resurse neutilizate integral sau ineficient",
+   "O combinație maxim eficientă"
+  ],
+  "answer": 1,
+  "explanation": "Punctele de pe frontieră presupun utilizarea integrală și eficientă a resurselor."
+ },
+ "c/consumator/buget": {
+  "id": "checkpoint-c-consumator-buget",
+  "q": "Care este condiția de accesibilitate a unui coș de bunuri?",
+  "options": [
+   "pₓ·x + pᵧ·y ≤ V",
+   "pₓ + pᵧ = x + y",
+   "x·y > V"
+  ],
+  "answer": 0,
+  "explanation": "Cheltuiala pentru cele două bunuri nu poate depăși venitul disponibil."
+ },
+ "c/consumator/preferinte": {
+  "id": "checkpoint-c-consumator-preferinte",
+  "q": "Ce au în comun combinațiile situate pe aceeași curbă de indiferență?",
+  "options": [
+   "Același cost de producție",
+   "Aceleași cantități din toate bunurile",
+   "Același nivel de utilitate"
+  ],
+  "answer": 2,
+  "explanation": "Curba de indiferență reunește coșuri cu satisfacție egală."
+ },
+ "c/consumator/utilitate": {
+  "id": "checkpoint-c-consumator-utilitate",
+  "q": "Cum se calculează utilitatea marginală?",
+  "options": [
+   "UT × Q",
+   "ΔUT / ΔQ",
+   "V / P"
+  ],
+  "answer": 1,
+  "explanation": "Utilitatea marginală este sporul de satisfacție asociat consumului suplimentar."
+ },
+ "c/consumator/optim": {
+  "id": "checkpoint-c-consumator-optim",
+  "q": "În modelul cu optim interior, ce relație descrie echilibrul consumatorului?",
+  "options": [
+   "UMₓ/Pₓ = UMᵧ/Pᵧ",
+   "UTₓ = UTᵧ în orice situație",
+   "Pₓ = Pᵧ întotdeauna"
+  ],
+  "answer": 0,
+  "explanation": "La optim, utilitatea marginală obținută pe unitatea monetară este egală între bunuri."
+ },
+ "c/cerere/lege": {
+  "id": "checkpoint-c-cerere-lege",
+  "q": "Potrivit legii cererii, dacă prețul unui bun scade, ceteris paribus:",
+  "options": [
+   "Cantitatea cerută scade",
+   "Cantitatea cerută rămâne obligatoriu zero",
+   "Cantitatea cerută tinde să crească"
+  ],
+  "answer": 2,
+  "explanation": "Legea cererii descrie relația inversă dintre preț și cantitatea cerută."
+ },
+ "c/cerere/factori": {
+  "id": "checkpoint-c-cerere-factori",
+  "q": "Ce se întâmplă de regulă cu cererea pentru bunul Y dacă se ieftinește bunul X, complementar?",
+  "options": [
+   "Crește",
+   "Dispare",
+   "Nu poate fi influențată"
+  ],
+  "answer": 0,
+  "explanation": "Bunurile complementare sunt utilizate împreună."
+ },
+ "c/cerere/elasticitate": {
+  "id": "checkpoint-c-cerere-elasticitate",
+  "q": "Când numim cererea elastică la preț, în valoare absolută?",
+  "options": [
+   "Când |E| = 0",
+   "Când |E| > 1",
+   "Când |E| < 1"
+  ],
+  "answer": 1,
+  "explanation": "Variația procentuală a cantității depășește variația procentuală a prețului."
+ },
+ "c/cerere/alte-elasticitati": {
+  "id": "checkpoint-c-cerere-alte-elasticitati",
+  "q": "Ce semn are, de regulă, elasticitatea încrucișată pentru bunurile substituibile?",
+  "options": [
+   "Negativ",
+   "Nul, obligatoriu",
+   "Pozitiv"
+  ],
+  "answer": 2,
+  "explanation": "Creșterea prețului unui substitut poate mări cererea pentru celălalt."
+ },
+ "c/cerere/atipica": {
+  "id": "checkpoint-c-cerere-atipica",
+  "q": "Ce caracterizează cazul special al bunurilor Giffen?",
+  "options": [
+   "Cantitatea cerută poate crește când prețul crește",
+   "Nu au niciun preț",
+   "Legea cererii se aplică mereu fără excepții"
+  ],
+  "answer": 0,
+  "explanation": "Materialul discută cazuri atipice în care relația obișnuită preț–cantitate nu se respectă."
+ },
+ "c/costuri/costuri-tipuri": {
+  "id": "checkpoint-c-costuri-costuri-tipuri",
+  "q": "Care exemplu descrie un cost implicit?",
+  "options": [
+   "Factura achitată unui furnizor",
+   "Costul de oportunitate al utilizării resurselor proprii",
+   "Chiria plătită efectiv"
+  ],
+  "answer": 1,
+  "explanation": "Costul implicit nu este plătit efectiv, dar este relevant pentru profitul economic."
+ },
+ "c/costuri/fixe-variabile": {
+  "id": "checkpoint-c-costuri-fixe-variabile",
+  "q": "Ce se întâmplă cu costul fix total pe termen scurt dacă Q = 0?",
+  "options": [
+   "Este suportat în continuare",
+   "Se transformă în venit",
+   "Devine automat egal cu profitul"
+  ],
+  "answer": 0,
+  "explanation": "Prezentarea precizează că firma suportă costurile fixe chiar și fără producție."
+ },
+ "c/costuri/medii": {
+  "id": "checkpoint-c-costuri-medii",
+  "q": "Cum se determină costul mediu total?",
+  "options": [
+   "Q / CT",
+   "CT + Q",
+   "CT / Q"
+  ],
+  "answer": 2,
+  "explanation": "Costul mediu total este costul total aferent unei unități produse, pentru Q > 0."
+ },
+ "c/costuri/marginal": {
+  "id": "checkpoint-c-costuri-marginal",
+  "q": "Ce măsoară costul marginal?",
+  "options": [
+   "Costul fix total",
+   "Variația costului total la variația producției",
+   "Profitul raportat la preț"
+  ],
+  "answer": 1,
+  "explanation": "În diferențe finite, Cmg = ΔCT / ΔQ."
+ },
+ "c/costuri/rentabilitate": {
+  "id": "checkpoint-c-costuri-rentabilitate",
+  "q": "Care este condiția pragului de rentabilitate?",
+  "options": [
+   "VT = CT",
+   "VT = 0 și CT > 0",
+   "Pr = VT + CT"
+  ],
+  "answer": 0,
+  "explanation": "La pragul de rentabilitate, profitul este zero."
+ },
+ "s/seminar-economie/economie": {
+  "id": "checkpoint-s-seminar-economie-economie",
+  "q": "Care două sensuri ale „economiei” apar în seminar?",
+  "options": [
+   "Doar comerț și bani",
+   "Realitate economică și știință economică",
+   "Doar microeconomie și matematică"
+  ],
+  "answer": 1,
+  "explanation": "Materialul distinge economia reală de știința care o studiază."
+ },
+ "s/seminar-economie/micro-macro": {
+  "id": "checkpoint-s-seminar-economie-micro-macro",
+  "q": "Analiza deciziei unei firme individuale este:",
+  "options": [
+   "Microeconomică",
+   "Macroeconomică în mod obligatoriu",
+   "Exclusiv normativă"
+  ],
+  "answer": 0,
+  "explanation": "Microeconomia studiază agenții elementari, precum firmele și gospodăriile."
+ },
+ "s/seminar-economie/rationalitate": {
+  "id": "checkpoint-s-seminar-economie-rationalitate",
+  "q": "Ce înseamnă eficacitate?",
+  "options": [
+   "Efort minim, indiferent de rezultat",
+   "Profit maxim prin orice mijloc",
+   "Atingerea scopului propus"
+  ],
+  "answer": 2,
+  "explanation": "Eficacitatea privește atingerea rezultatului; eficiența include raportarea la efort."
+ },
+ "s/seminar-economie/pozitiv-normativ": {
+  "id": "checkpoint-s-seminar-economie-pozitiv-normativ",
+  "q": "Care afirmație este normativă?",
+  "options": [
+   "Prețul a crescut cu 5%",
+   "Ar trebui redus prețul",
+   "Cantitatea cerută a scăzut"
+  ],
+  "answer": 1,
+  "explanation": "Afirmația normativă exprimă ce ar trebui să se întâmple."
+ },
+ "s/seminar-economie/principii": {
+  "id": "checkpoint-s-seminar-economie-principii",
+  "q": "Care idee este unul dintre principiile lui Mankiw prezentate la seminar?",
+  "options": [
+   "Oamenii reacționează la stimulente",
+   "Alegerile nu implică niciodată sacrificii",
+   "Schimbul nu poate aduce beneficii"
+  ],
+  "answer": 0,
+  "explanation": "Sensibilitatea la stimulente apare în lista de principii din prezentare."
+ },
+ "s/seminar-consumator/gospodarie": {
+  "id": "checkpoint-s-seminar-consumator-gospodarie",
+  "q": "Ce este gospodăria în materialul de seminar?",
+  "options": [
+   "Doar o persoană care produce",
+   "Un agent economic alcătuit din persoane care își gestionează împreună venitul",
+   "Doar un întreprinzător"
+  ],
+  "answer": 1,
+  "explanation": "Gospodăria este agent economic consumator format din una sau mai multe persoane."
+ },
+ "s/seminar-consumator/ut-um": {
+  "id": "checkpoint-s-seminar-consumator-ut-um",
+  "q": "Când utilitatea marginală ajunge la zero, utilitatea totală:",
+  "options": [
+   "Devine automat negativă",
+   "Începe obligatoriu să crească mai rapid",
+   "Se află la maximul de saturație în exemplul prezentat"
+  ],
+  "answer": 2,
+  "explanation": "În tabelul seminarului, la Q = 6, UM = 0 și UT = 30, valoare maximă."
+ },
+ "s/seminar-consumator/buget": {
+  "id": "checkpoint-s-seminar-consumator-buget",
+  "q": "Cu Pₓ = 10, Pᵧ = 20 și V = 200, câte unități Y poți cumpăra dacă X = 0?",
+  "options": [
+   "10",
+   "20",
+   "5"
+  ],
+  "answer": 0,
+  "explanation": "În condițiile exemplului, Ymax = V/Pᵧ = 200/20 = 10."
+ },
+ "s/seminar-consumator/indiferenta": {
+  "id": "checkpoint-s-seminar-consumator-indiferenta",
+  "q": "Ce indică punctele de pe aceeași curbă de indiferență?",
+  "options": [
+   "Prețuri obligatoriu egale",
+   "Utilitate totală egală",
+   "Venituri diferite în mod obligatoriu"
+  ],
+  "answer": 1,
+  "explanation": "Seminarul notează UA = UB = UC pentru punctele aceleiași curbe."
+ },
+ "s/seminar-consumator/optim": {
+  "id": "checkpoint-s-seminar-consumator-optim",
+  "q": "La optimul interior al consumatorului:",
+  "options": [
+   "Bugetul nu contează",
+   "Consumatorul cumpără doar bunul mai ieftin",
+   "UMₓ/Pₓ = UMᵧ/Pᵧ"
+  ],
+  "answer": 2,
+  "explanation": "Optimizarea combină condiția utilităților marginale raportate la preț cu ecuația bugetului."
+ },
+ "s/seminar-utilitate/diferente": {
+  "id": "checkpoint-s-seminar-utilitate-diferente",
+  "q": "Ce distinge utilitatea economică de cea intrinsecă?",
+  "options": [
+   "Utilitatea economică depinde de aprecierea consumatorului",
+   "Utilitatea economică este identică pentru orice persoană",
+   "Utilitatea intrinsecă este întotdeauna negativă"
+  ],
+  "answer": 0,
+  "explanation": "Fișa distinge utilitatea intrinsecă, obiectivă, de cea economică, preponderent subiectivă."
+ },
+ "s/seminar-utilitate/intrebari": {
+  "id": "checkpoint-s-seminar-utilitate-intrebari",
+  "q": "Ce se întâmplă cu UT atunci când UM este negativă?",
+  "options": [
+   "Rămâne mereu constantă",
+   "Scade",
+   "Crește cu o rată constantă"
+  ],
+  "answer": 1,
+  "explanation": "Un spor negativ al utilității marginale reduce utilitatea totală."
+ },
+ "s/seminar-utilitate/mandarine": {
+  "id": "checkpoint-s-seminar-utilitate-mandarine",
+  "q": "Ce utilitate totală obține Ioana după 4 mandarine cu UM de 100, 70, 40 și 0?",
+  "options": [
+   "100",
+   "170",
+   "210"
+  ],
+  "answer": 2,
+  "explanation": "Adunăm utilitățile marginale: 100 + 70 + 40 + 0 = 210."
+ },
+ "s/seminar-utilitate/buget-ovidiu": {
+  "id": "checkpoint-s-seminar-utilitate-buget-ovidiu",
+  "q": "În problema lui Ovidiu, care este excedentul bugetului săptămânal?",
+  "options": [
+   "250.000 lei",
+   "150.000 lei",
+   "400.000 lei"
+  ],
+  "answer": 0,
+  "explanation": "Venit 400.000 lei minus cheltuieli 150.000 lei = excedent 250.000 lei."
+ },
+ "s/seminar-utilitate/recapitulare": {
+  "id": "checkpoint-s-seminar-utilitate-recapitulare",
+  "q": "Dacă UM > 0 pentru o unitate suplimentară, ce se întâmplă cu UT?",
+  "options": [
+   "Scade",
+   "Crește",
+   "Devine întotdeauna zero"
+  ],
+  "answer": 1,
+  "explanation": "Fișa de autoevaluare confirmă că utilitatea totală crește când utilitatea marginală este pozitivă."
+ }
+};
+
+const oldReader=renderReader;
+renderReader=function(m,s){oldReader(m,s);insertReaderTools('c',m.id,s,m.sections.indexOf(s));};
+const oldSeminarReader=renderSeminarReader;
+renderSeminarReader=function(u,s){oldSeminarReader(u,s);insertReaderTools('s',u.id,s,u.sections.indexOf(s));};
+
+const oldFormulaCard=formulaCard;
+formulaCard=function(f){const content=oldFormulaCard(f);const saved=extras.favoriteFormulas.includes(f.id);
+ return content.replace('class="card formula-card"',`class="card formula-card" data-formula-id="${f.id}"`).replace('</article>',`<button class="formula-star ${saved?'is-saved':''}" data-favorite-formula="${f.id}" type="button" aria-label="${saved?'Elimină formula din salvate':'Salvează formula'}" aria-pressed="${saved}">${saved?'★ Salvată':'☆ Salvează'}</button></article>`);
+};
+const oldFormulaContent=renderFormulaContent;
+renderFormulaContent=function(){
+ const isSaved=formulaMode==='lista'&&formulaFilter==='salvate';
+ if(isSaved)formulaFilter='toate';
+ oldFormulaContent();
+ if(isSaved)formulaFilter='salvate';
+ if(formulaMode==='lista'){
+  const pills=$('.filter-pills');pills?.insertAdjacentHTML('beforeend',`<button type="button" class="filter-pill ${isSaved?'active':''}" data-filter="salvate">★ Salvate (${extras.favoriteFormulas.length})</button>`);
+  if(isSaved){$$('.filter-pills .filter-pill').forEach(btn=>{if(btn.dataset.filter!=='salvate')btn.classList.remove('active');});applyFormulaSavedFilter();}
+ }else{
+  const f=FORMULAS[flashIndex%FORMULAS.length],saved=extras.favoriteFormulas.includes(f.id);
+  $('.flash-buttons')?.insertAdjacentHTML('afterend',`<div class="flash-foot"><button type="button" class="bookmark-button ${saved?'is-saved':''}" data-favorite-formula="${f.id}" aria-pressed="${saved}">${saved?'★ Formula e salvată':'☆ Salvează formula'}</button><span>Apasă <kbd>Space</kbd> ca să întorci fișa.</span></div>`);
+ }
+};
+function applyFormulaSavedFilter(){
+ const list=$('#formulaList');if(!list||formulaFilter!=='salvate')return;
+ let n=0;$$('.formula-card',list).forEach(card=>{const show=extras.favoriteFormulas.includes(Number(card.dataset.formulaId));card.hidden=!show;if(show)n++;});
+ const line=$('.subtle-line',$('#formulaContent'));if(line)line.textContent=`${n} formule salvate afișate`;
+ if(!n)list.insertAdjacentHTML('beforeend','<div class="empty-state" data-empty-save>Nu ai formule salvate care să corespundă căutării. Apasă ☆ pe o formulă pentru a o păstra aici.</div>');
+}
+const oldFormulaRefresh=refreshFormulaListOnly;
+refreshFormulaListOnly=function(){const saved=formulaFilter==='salvate';if(saved)formulaFilter='toate';oldFormulaRefresh();if(saved){formulaFilter='salvate';$$('[data-empty-save]').forEach(x=>x.remove());applyFormulaSavedFilter();}};
+
+const oldSetup=renderQuizSetup;
+renderQuizSetup=function(source){oldSetup(source);
+ const hint=extras.results.length?`Ultimul test: <strong>${extras.results[extras.results.length-1].score}%</strong>. ${extras.results.length} teste finalizate pe acest dispozitiv.`:'Nu ai susținut încă un test. Începe cu 10 întrebări.';
+ $('.settings-panel')?.insertAdjacentHTML('afterend',`<div class="quiz-tools"><div><strong>Învață din greșeli</strong><p>${hint}</p></div><button class="button button-secondary" type="button" data-review-mistakes ${extras.missed.length?'':'disabled'}>Repetă ${extras.missed.length} întrebări greșite ↻</button></div>`);
+};
+function storeQuizSession(){try{if(quizSession)sessionStorage.setItem('microlearn-active-quiz',JSON.stringify(quizSession));else sessionStorage.removeItem('microlearn-active-quiz');}catch{/* Optional. */}}
+const oldQuizStart=startQuiz;
+startQuiz=function(){oldQuizStart();if(quizSession){quizSession.sessionId=Date.now()+'-'+Math.round(Math.random()*1e8);storeQuizSession();}};
+const oldQuizRender=renderQuiz;
+renderQuiz=function(){oldQuizRender();storeQuizSession();if($('.question-card')){$('.question-card').insertAdjacentHTML('beforeend','<p class="quiz-shortcuts">Sfat: poți răspunde folosind tastele 1–5 și poți trece mai departe cu Enter.</p>');}};
+const oldQuizAnswer=answerQuiz;
+answerQuiz=function(choice){const q=currentQuizQuestion();if(!q||quizSession.answers[q.id]!==undefined)return;
+ if(choice===q.answer){extras.missed=extras.missed.filter(id=>id!==q.id);}else if(!extras.missed.includes(q.id)){extras.missed.push(q.id);}
+ saveExtras();oldQuizAnswer(choice);storeQuizSession();
+};
+function reviewMissed(){const qs=QUESTIONS.filter(q=>extras.missed.includes(q.id));if(!qs.length){toast('Nu ai greșeli salvate de repetat.');return;}quizSession={questions:shuffle(qs),index:0,answers:{},wrongIds:[],sessionId:'review-'+Date.now()};storeQuizSession();location.hash='quiz';if(location.hash==='#quiz')renderQuiz();}
+const oldQuizResults=renderQuizResults;
+renderQuizResults=function(){oldQuizResults();const s=quizSession;if(!s)return;
+ if(!s.sessionId)s.sessionId='session-'+Date.now();
+ if(!extras.results.some(x=>x.id===s.sessionId)){
+  const correct=s.questions.length-s.wrongIds.length;
+  extras.results.push({id:s.sessionId,date:new Date().toISOString(),correct,total:s.questions.length,score:percent(correct,s.questions.length)});
+  extras.results=extras.results.slice(-30);saveExtras();
+ }
+ const wrong=s.questions.filter(q=>s.wrongIds.includes(q.id));
+ const review=wrong.length?`<details class="review-details"><summary>Vezi explicațiile pentru cele ${wrong.length} întrebări greșite</summary><ol>${wrong.map(q=>{const m=moduleById(q.section),u=SEMINAR_UNITS.find(x=>x.id===q.section),link=m?modLink(m):u?seminarLink(u):'#lectii';return `<li><strong>${esc(q.q)}</strong><p>Răspuns: ${esc(q.options[q.answer])}${q.explanation?' — '+esc(q.explanation):''}</p><a href="${link}">Revezi tema →</a></li>`;}).join('')}</ol></details>`:'<p class="completion-good">✓ Nu ai întrebări greșite de revăzut din acest test.</p>';
+ $('.result-card')?.insertAdjacentHTML('beforeend',`<div class="result-review">${review}<p class="result-muted">Istoricul testului este salvat local. Îl poți consulta în „Colecția mea”.</p></div>`);
+};
+
+/* Grafice: actualizare fără înlocuirea glisoarelor, pentru drag continuu. */
+const oldRenderGraph=renderGraph;
+renderGraph=function(kind,values={}){
+ if(kind==='fpp'){
+  const points=[[0,500],[100,400],[200,250],[250,90],[275,0]],i=Math.max(0,Math.min(4,Number(values.i??0)));
+  const to=([x,y])=>[65+x/290*470,233-y/520*208];
+  const body=frameAxes('Computere','Mere (kg)')+`<path class="graph-line" d="${points.map((p,j)=>(j?'L':'M')+coords(...to(p))).join(' ')}"/>`+points.map((p,j)=>{const [x,y]=to(p);return `<circle class="${i===j?'graph-dot-current':'graph-dot'}" cx="${x}" cy="${y}" r="${i===j?8:4}"/><text class="graph-strong" x="${x+9}" y="${y-9}">${'ABCDE'[j]}</text>`;}).join('');
+  const diff=i?((points[i-1][1]-points[i][1])/(points[i][0]-points[i-1][0])):null;
+  const desc=`Punctul ${'ABCDE'[i]}: ${points[i][0]} computere, ${points[i][1]} kg de mere. ${i?`Trecând de la ${'ABCDE'[i-1]} la ${'ABCDE'[i]}, costul de oportunitate este de ${num(diff)} kg de mere/computer.`:'Alege punctul următor pentru a vedea costul de oportunitate.'}`;
+  return makeGraphFrame('Frontiera posibilităților de producție',body,desc,`<label>Punctul FPP <input type="range" data-key="i" min="0" max="4" step="1" value="${i}" aria-label="Punct de pe frontiera posibilităților de producție"><output>${'ABCDE'[i]}</output></label>`);
+ }
+ if(kind==='budget'){
+  const V=Number(values.V??60),px=Number(values.px??10),py=Number(values.py??5),xmax=V/px,ymax=V/py;
+  const xMax=Math.max(25,Math.ceil(xmax/5)*5),yMax=Math.max(45,Math.ceil(ymax/5)*5);
+  let body=frameAxes('Bunul X','Bunul Y');const x=65+xmax/xMax*470,y=233-ymax/yMax*209;
+  body+=`<path class="graph-line" d="M65 ${y}L${x} 233"/><circle class="graph-dot-current" cx="65" cy="${y}" r="6"/><circle class="graph-dot-current" cx="${x}" cy="233" r="6"/><text class="graph-strong" x="81" y="${Math.max(27,y-12)}">${num(ymax)} Y</text><text class="graph-strong" x="${Math.min(465,x)}" y="257">${num(xmax)} X</text>`;
+  const ctr=`<label>Venit V <input type="range" data-key="V" min="30" max="120" step="10" value="${V}"><output>${V}</output></label><label>Preț X <input type="range" data-key="px" min="5" max="15" step="1" value="${px}"><output>${px}</output></label><label>Preț Y <input type="range" data-key="py" min="3" max="12" step="1" value="${py}"><output>${py}</output></label>`;
+  return makeGraphFrame('Linia bugetului',body,`Venit: ${V} u.m. · intersecții X = ${num(xmax)}, Y = ${num(ymax)} · panta = −${num(px/py)}.`,ctr);
+ }
+ return oldRenderGraph(kind,values);
+};
+bindGraph=function(el){
+ const kind=el.dataset.graph;
+ $$('input[type=range]',el).forEach(input=>input.addEventListener('input',()=>{
+  const values=Object.fromEntries($$('input[type=range]',el).map(x=>[x.dataset.key,x.value]));
+  const temp=document.createElement('div');temp.innerHTML=renderGraph(kind,values);
+  const svg=$('svg',el),fresh=$('svg',temp);if(svg&&fresh)svg.replaceWith(fresh);
+  const caption=$('.graph-caption',el),newCaption=$('.graph-caption',temp);if(caption&&newCaption)caption.textContent=newCaption.textContent;
+  $$('input[type=range]',el).forEach(x=>{const out=x.parentElement.querySelector('output');if(out){out.textContent=kind==='fpp'?'ABCDE'[Number(x.value)]:x.value;}});
+ }));
+};
+
+function renderLab(){
+ root.innerHTML=header('LABORATOR / APLICAȚII','Testează cifrele, nu doar formulele.','Modifică valorile și vezi imediat pașii de calcul. Exemplele de aici sunt modele ilustrative, bazate pe formulele din curs și seminar.')+`<div class="lab-tabs" role="group" aria-label="Alege calculatorul"><button type="button" data-lab-tab="budget" class="active">Buget</button><button type="button" data-lab-tab="elasticity">Elasticitatea cererii</button><button type="button" data-lab-tab="profit">Costuri și profit</button></div><section class="lab-card card" id="labContent"></section><p class="lab-disclaimer">Aceste calculatoare sunt auxiliare de învățare. Ipotezele sunt afișate pentru fiecare model; nu înlocuiesc explicațiile din materiale.</p>`;
+ renderLabPanel('budget');
+}
+let activeLab='budget';
+function labField(id,label,val,step='1',min='0'){return `<label class="lab-field"><span>${label}</span><input type="number" data-lab-input="${id}" step="${step}" min="${min}" value="${val}"></label>`;}
+function renderLabPanel(tab){activeLab=tab;
+ $$('[data-lab-tab]').forEach(b=>{b.classList.toggle('active',b.dataset.labTab===tab);b.setAttribute('aria-pressed',String(b.dataset.labTab===tab));});
+ const panel=$('#labContent');if(!panel)return;
+ const config={budget:{label:'01 / CONSUMATOR',title:'Dreapta bugetului',desc:'Cum se schimbă combinațiile accesibile când modifici venitul sau prețurile?',fields:[['v','Venit disponibil V',200],['px','Prețul lui X',10],['py','Prețul lui Y',20],['x','Cantitatea aleasă X',10]],tip:'Ipoteză: două bunuri, prețuri pozitive, fără credit.'},elasticity:{label:'02 / CERERE',title:'Elasticitatea cererii la preț',desc:'Compară variațiile procentuale și elasticitatea calculată între două puncte.',fields:[['p0','Preț inițial P₀',10],['p1','Preț final P₁',12],['q0','Cantitate inițială Q₀',100],['q1','Cantitate finală Q₁',80]],tip:'Convenția punctuală de bază folosește valorile inițiale; arcul folosește mediile.'},profit:{label:'03 / PRODUCĂTOR',title:'Costuri, profit și rentabilitate',desc:'Aplică relațiile CT = CF + CV, Pr = VT − CT și pragul de rentabilitate.',fields:[['cf','Cost fix CF',200],['cv','Cost variabil/unitate',15],['p','Preț/unitate',25],['q','Cantitate produsă Q',30]],tip:'Ipoteză ilustrativă: preț și cost variabil unitar constante.'}}[tab];
+ panel.innerHTML=`<div class="lab-panel-head"><div><span class="eyebrow">${config.label}</span><h2>${config.title}</h2><p>${config.desc}</p></div><div class="lab-symbol" aria-hidden="true">${tab==='budget'?'x + y':tab==='elasticity'?'Δ%':'π'}</div></div><div class="lab-content"><div class="lab-inputs">${config.fields.map(([id,title,val])=>labField(id,title,val)).join('')}<p class="lab-tip">${config.tip}</p></div><div class="lab-results" id="labResults" aria-live="polite"></div></div>`;
+ updateLab();
+}
+function updateLab(){const inputs=Object.fromEntries($$('[data-lab-input]').map(x=>[x.dataset.labInput,Number(x.value)]));
+ const out=$('#labResults');if(!out)return;
+ if($$('[data-lab-input]').some(x=>x.value.trim()===''||!Number.isFinite(Number(x.value)))){out.innerHTML='<p>Completează toate valorile cu numere valide.</p>';return;}
+ const f=x=>new Intl.NumberFormat('ro-RO',{maximumFractionDigits:3}).format(Math.round(x*10000)/10000);
+ const metric=(name,value)=>`<div class="lab-metric"><span>${name}</span><strong>${value}</strong></div>`;
+ if(activeLab==='budget'){
+  const {v,px,py,x}=inputs;
+  if(px<=0||py<=0||v<0||x<0){out.innerHTML='<p class="lab-error">Prețurile trebuie să fie pozitive, iar venitul și cantitatea nenegative.</p>';return;}
+  const rem=v-px*x,y=rem/py;
+  out.innerHTML=`<h3>Rezultate</h3>${metric('X maxim (V / Pₓ)',f(v/px))}${metric('Y maxim (V / Pᵧ)',f(v/py))}${metric('Panta liniei bugetului','−'+f(px/py))}${metric('Cantitatea Y pentru X ales',y<0?'Buget depășit':f(y))}<div class="lab-equation">${f(px)} × X + ${f(py)} × Y = ${f(v)}</div><p>${rem<0?'Această combinație este imposibilă la venitul dat.':`După ${f(x)} unități din X, rămân ${f(rem)} u.m. pentru Y.`}</p>`;
+ }else if(activeLab==='elasticity'){
+  const {p0,p1,q0,q1}=inputs;if(p0<=0||p1<=0||q0<=0||q1<0){out.innerHTML='<p class="lab-error">Prețurile și Q₀ trebuie să fie pozitive; Q₁ poate fi zero.</p>';return;}
+  const dp=(p1-p0)/p0*100,dq=(q1-q0)/q0*100,zero=p1===p0;
+  const e=zero?null:(q1-q0)/q0/((p1-p0)/p0);
+  const arc=zero?null:((q1-q0)/((q0+q1)/2))/((p1-p0)/((p0+p1)/2));
+  out.innerHTML=`<h3>Rezultate</h3>${metric('Variație preț',f(dp)+'%')}${metric('Variație cantitate',f(dq)+'%')}${metric('Elasticitate (bază inițială)',zero?'Nedefinită':f(e))}${metric('Elasticitate de arc',zero?'Nedefinită':f(arc))}<div class="lab-equation">E = (%ΔQ) / (%ΔP)</div><p>${zero?'Când ΔP = 0, coeficientul nu poate fi calculat astfel.':`În valoare absolută, cererea este ${Math.abs(e)>1?'elastică':Math.abs(e)<1?'inelastică':'unitar elastică'} după formula cu bază inițială.`}</p>`;
+ }else{
+  const {cf,cv,p,q}=inputs;if([cf,cv,p,q].some(v=>v<0)){out.innerHTML='<p class="lab-error">Introduceți valori nenegative.</p>';return;}
+  const ct=cf+cv*q,vt=p*q,profit=vt-ct,qr=p>cv?cf/(p-cv):null,flatBreakEven=p===cv&&cf===0,zeroOnly=p<cv&&cf===0;
+  out.innerHTML=`<h3>Rezultate</h3>${metric('Cost total CT',f(ct)+' u.m.')}${metric('Venit total VT',f(vt)+' u.m.')}${metric('Profit contabil',f(profit)+' u.m.')}${metric('Prag de rentabilitate',flatBreakEven?'Orice cantitate':zeroOnly?'Doar Q = 0':qr===null?'Nu există prag finit':f(qr)+' unități')}<div class="lab-equation">Pr = (${f(p)} − ${f(cv)}) × ${f(q)} − ${f(cf)}</div><p>${flatBreakEven?'Cu CF = 0 și preț egal cu costul variabil unitar, profitul este zero la orice Q.':zeroOnly?'Cu CF = 0 și preț sub costul variabil unitar, numai Q = 0 permite profit zero.':qr===null?'La aceste valori nu există un prag pozitiv de rentabilitate; creșterea producției nu acoperă costul fix.':profit>=0?'La volumul introdus firma nu înregistrează pierdere.':'La volumul introdus firma înregistrează pierdere.'}</p>`;
+ }
+}
+
+function renderCollection(){
+ const bookmarked=extras.bookmarks.map(bookmarkName).filter(Boolean),formulas=FORMULAS.filter(f=>extras.favoriteFormulas.includes(f.id)),noted=Object.entries(extras.notes).filter(([,v])=>String(v).trim());
+ const histories=extras.results.slice(-6).reverse();
+ root.innerHTML=header('SPAȚIUL TĂU','Colecția mea.','Lecții salvate, formule, notițe și rezultate — organizate într-un singur loc. Totul rămâne în browserul tău.')+`<div class="collection-overview">${summaryPill('lecții salvate',bookmarked.length)}${summaryPill('formule salvate',formulas.length)}${summaryPill('notițe',noted.length)}${summaryPill('grile de repetat',extras.missed.length)}</div>
+ <div class="collection-grid"><section class="card collection-panel"><div class="collection-head"><h2>☆ Lecțiile mele</h2><span>${bookmarked.length}</span></div>${bookmarked.length?`<div class="saved-list">${bookmarked.map(b=>`<a href="${b.url}"><span class="quiet-tag">${b.kind}</span><strong>${esc(b.title)}</strong><small>${esc(b.sub)}</small><span aria-hidden="true">↗</span></a>`).join('')}</div>`:'<p class="collection-empty">Salvează lecțiile importante apăsând ☆ când le citești.</p>'}</section>
+ <section class="card collection-panel"><div class="collection-head"><h2>ƒ Formule importante</h2><span>${formulas.length}</span></div>${formulas.length?`<div class="saved-list">${formulas.map(f=>`<a href="#formule"><strong>${esc(f.title)}</strong><small class="formula-mini">${esc(f.expr)}</small><span aria-hidden="true">↗</span></a>`).join('')}</div>`:'<p class="collection-empty">Salvează formulele din bibliotecă sau de pe fișele de memorie.</p>'}</section>
+ <section class="card collection-panel"><div class="collection-head"><h2>✎ Notițe</h2><span>${noted.length}</span></div>${noted.length?`<div class="saved-list">${noted.map(([key,text])=>{const item=bookmarkName(key);return item?`<a href="${item.url}"><strong>${esc(item.title)}</strong><small>${esc(text.slice(0,120))}${text.length>120?'…':''}</small><span aria-hidden="true">↗</span></a>`:'';}).join('')}</div>`:'<p class="collection-empty">Deschide secțiunea „Notițele mele” de la finalul unei lecții.</p>'}</section>
+ <section class="card collection-panel"><div class="collection-head"><h2>◉ Testele mele</h2><span>${extras.results.length}</span></div>${histories.length?`<div class="saved-list">${histories.map(r=>`<div class="history-item"><strong>${r.score}%</strong><span>${r.correct}/${r.total} corecte</span><small>${new Date(r.date).toLocaleDateString('ro-RO',{day:'2-digit',month:'short',year:'numeric'})}</small></div>`).join('')}</div>`:'<p class="collection-empty">După primul test, scorul va apărea aici.</p>'}<button type="button" class="button button-secondary collection-quiz" data-review-mistakes ${extras.missed.length?'':'disabled'}>Repetă ${extras.missed.length} întrebări greșite</button></section></div>
+ <section class="card data-panel"><div><h2>Progresul îți aparține</h2><p>Poți salva un fișier JSON cu lecțiile parcurse, notițele, formulele și rezultatele, apoi să îl imporți pe alt dispozitiv.</p></div><div class="data-buttons"><button class="button" type="button" id="exportProgress">Exportă progresul ↓</button><label class="button button-secondary upload-button">Importă progresul <input type="file" id="importProgress" accept=".json,application/json" hidden></label><button class="button button-ghost" type="button" id="resetProgress">Resetează datele</button></div></section>`;
+}
+function exportProgress(){
+ const exportObject={app:'microlearn',version:2,exportedAt:new Date().toISOString(),course:state,extras};
+ const blob=new Blob([JSON.stringify(exportObject,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob);
+ const a=document.createElement('a');a.href=url;a.download='microlearn-progres.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Fișierul de progres a fost exportat.');
+}
+async function importProgress(file){
+ if(!file)return;
+ try{
+  if(file.size>2e6)throw new Error('Fișier prea mare.');
+  const data=JSON.parse(await file.text());
+  if(data.app!=='microlearn'||!data.course||!data.extras||data.version!==2)throw new Error('Fișierul nu este un export Microlearn 2.');
+  if(!Array.isArray(data.course.completed)||!Array.isArray(data.course.seminarCompleted)||!Array.isArray(data.extras.bookmarks)||!Array.isArray(data.extras.favoriteFormulas)||typeof data.extras.notes!=='object'||!Array.isArray(data.extras.missed)||!Array.isArray(data.extras.results))throw new Error('Structura fișierului este invalidă.');
+  if(!confirm('Importul va înlocui progresul și notițele salvate pe acest dispozitiv. Continui?'))return;
+  const allowedCourse=new Set(MODULES.flatMap(m=>m.sections.map(s=>`${m.id}/${s.id}`))),allowedSeminar=new Set(SEMINAR_UNITS.flatMap(u=>u.sections.map(s=>`${u.id}/${s.id}`))),allowedNotes=new Set(allLessonRecords().map(r=>r.key)),allowedFormula=new Set(FORMULAS.map(f=>f.id)),allowedQuestion=new Set(QUESTIONS.map(q=>q.id));
+  state.completed=[...new Set(data.course.completed.filter(k=>typeof k==='string'&&allowedCourse.has(k)))];
+  state.seminarCompleted=[...new Set(data.course.seminarCompleted.filter(k=>typeof k==='string'&&allowedSeminar.has(k)))];
+  state.last=data.course.last||null;state.lastSeminar=data.course.lastSeminar||null;state.dark=!!data.course.dark;setTheme();
+  extras.bookmarks=[...new Set(data.extras.bookmarks.filter(k=>allowedNotes.has(k)))];
+  extras.favoriteFormulas=[...new Set(data.extras.favoriteFormulas.filter(id=>allowedFormula.has(id)))];
+  extras.notes=Object.fromEntries(Object.entries(data.extras.notes).filter(([key,value])=>allowedNotes.has(key)&&typeof value==='string').map(([key,value])=>[key,value.slice(0,8000)]));
+  extras.missed=[...new Set(data.extras.missed.filter(id=>allowedQuestion.has(id)))];
+  extras.results=data.extras.results.filter(x=>x&&typeof x.id==='string'&&Number.isFinite(x.score)&&Number.isFinite(x.total)).slice(-30);
+  saveState();saveExtras();render();toast('Progresul a fost importat.');
+ }catch(e){toast('Import eșuat: '+e.message);}
+}
+function resetProgress(){
+ if(!confirm('Ștergi toate lecțiile parcurse, notițele, formulele salvate și istoricul grilelor de pe acest dispozitiv?'))return;
+ state.completed=[];state.seminarCompleted=[];state.last=null;state.lastSeminar=null;
+ extras={bookmarks:[],favoriteFormulas:[],notes:{},missed:[],results:[]};quizSession=null;
+ try{sessionStorage.removeItem('microlearn-active-quiz');}catch{}
+ saveState();saveExtras();render();toast('Datele locale au fost resetate.');
+}
+
+const searchIndex=[...allLessonRecords().map(r=>({title:r.title,sub:r.sub+' · '+r.kind,url:r.url,text:r.full,type:'Lecție'})),...FORMULAS.map(f=>({title:f.title,sub:moduleById(f.module).title,url:'#formule',text:f.expr+' '+f.detail,type:'Formulă'}))];
+function openGlobalSearch(){const d=$('#searchDialog');if(!d.open)d.showModal();$('#globalSearch').value='';showSearchResults('');$('#globalSearch').focus();}
+function showSearchResults(query){const list=$('#globalSearchResults'),q=normalizeText(query.trim());
+ if(!q){list.innerHTML=`<p class="search-helper">Încearcă: <button type="button" data-search-suggest="utilitate marginală">utilitate marginală</button> <button type="button" data-search-suggest="elasticitate">elasticitate</button> <button type="button" data-search-suggest="profit">profit</button></p><p class="search-helper bottom">${TOTAL_SECTIONS+TOTAL_SEMINAR_SECTIONS} secțiuni și ${FORMULAS.length} formule pot fi căutate.</p>`;return;}
+ const results=searchIndex.map(item=>{const title=normalizeText(item.title),sub=normalizeText(item.sub),text=normalizeText(item.text);const score=title.includes(q)?3:sub.includes(q)?2:text.includes(q)?1:0;return {...item,score};}).filter(item=>item.score).sort((a,b)=>b.score-a.score).slice(0,18);
+ list.innerHTML=results.length?`<div class="search-result-count">${results.length} rezultate${results.length===18?' dintre cele mai relevante':''}</div>${results.map(item=>`<a href="${item.url}" class="global-result"><span class="quiet-tag">${item.type}</span><strong>${esc(item.title)}</strong><small>${esc(item.sub)}</small><span class="result-arrow" aria-hidden="true">↗</span></a>`).join('')}`:'<div class="search-no-results">Niciun rezultat. Încearcă un termen mai scurt.</div>';
+}
+function handleQuickAnswer(button){const container=button.closest('.quick-check'),q=Object.values(CHECKPOINTS).find(q=>q.id===button.dataset.quickId),n=Number(button.dataset.quickAnswer);if(!q||!container||container.dataset.answered)return;
+ container.dataset.answered='true';$$('[data-quick-answer]',container).forEach(b=>{const index=Number(b.dataset.quickAnswer);b.disabled=true;b.classList.toggle('correct',index===q.answer);b.classList.toggle('incorrect',index===n&&index!==q.answer);});
+ const target=$('.quick-check-feedback',container);target.innerHTML=n===q.answer?'✓ Corect. Ai reținut ideea.':`Răspunsul corect: <strong>${esc(q.options[q.answer])}</strong>.`;
+ if(q.explanation)target.insertAdjacentHTML('beforeend',`<span>${esc(q.explanation)}</span>`);
+
+}
+function initExtras(){
+ $('#searchOpen').addEventListener('click',openGlobalSearch);
+ $('#searchClose').addEventListener('click',()=>$('#searchDialog').close());
+ $('#globalSearch').addEventListener('input',e=>showSearchResults(e.target.value));
+ $('#globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){const first=$('.global-result');if(first){e.preventDefault();$('#searchDialog').close();location.hash=first.getAttribute('href');}}});
+ $('#searchDialog').addEventListener('click',e=>{if(e.target===e.currentTarget)e.currentTarget.close();});
+ document.addEventListener('click',e=>{
+  if(e.target.closest('.global-result'))$('#searchDialog').close();
+  const suggestion=e.target.closest('[data-search-suggest]');if(suggestion){$('#globalSearch').value=suggestion.dataset.searchSuggest;showSearchResults(suggestion.dataset.searchSuggest);$('#globalSearch').focus();return;}
+  const book=e.target.closest('[data-bookmark]');if(book){const key=book.dataset.bookmark;extras.bookmarks=extras.bookmarks.includes(key)?extras.bookmarks.filter(x=>x!==key):[...extras.bookmarks,key];saveExtras();book.classList.toggle('is-saved',extras.bookmarks.includes(key));book.setAttribute('aria-pressed',String(extras.bookmarks.includes(key)));book.textContent=extras.bookmarks.includes(key)?'★ Salvată':'☆ Salvează lecția';toast(extras.bookmarks.includes(key)?'Lecția a fost salvată.':'Lecția nu mai este salvată.');return;}
+  const formula=e.target.closest('[data-favorite-formula]');if(formula){const id=Number(formula.dataset.favoriteFormula);extras.favoriteFormulas=extras.favoriteFormulas.includes(id)?extras.favoriteFormulas.filter(x=>x!==id):[...extras.favoriteFormulas,id];saveExtras();const isSaved=extras.favoriteFormulas.includes(id);formula.classList.toggle('is-saved',isSaved);formula.textContent=isSaved?'★ Salvată':'☆ Salvează';formula.setAttribute('aria-pressed',String(isSaved));if(formulaMode==='fise')renderFormulaContent();else{const btn=$('[data-filter="salvate"]');if(btn)btn.textContent=`★ Salvate (${extras.favoriteFormulas.length})`;if(formulaFilter==='salvate')renderFormulaContent();}toast(isSaved?'Formula a fost salvată.':'Formula a fost eliminată din salvate.');return;}
+  const quick=e.target.closest('[data-quick-answer]');if(quick){handleQuickAnswer(quick);return;}
+  const lab=e.target.closest('[data-lab-tab]');if(lab){renderLabPanel(lab.dataset.labTab);return;}
+  if(e.target.closest('[data-review-mistakes]')){reviewMissed();return;}
+  if(e.target.closest('#exportProgress')){exportProgress();return;}
+  if(e.target.closest('#resetProgress')){resetProgress();return;}
+ });
+ document.addEventListener('input',e=>{if(e.target.matches('[data-note]')){extras.notes[e.target.dataset.note]=e.target.value;saveExtras();}if(e.target.matches('[data-lab-input]'))updateLab();});
+ document.addEventListener('change',e=>{if(e.target.id==='importProgress'){importProgress(e.target.files[0]);e.target.value='';}});
+ document.addEventListener('keydown',e=>{
+  const editing=e.target.matches('input,textarea,select,[contenteditable]');
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openGlobalSearch();return;}
+  if(!editing&&location.hash.startsWith('#quiz')&&quizSession&&quizSession.index<quizSession.questions.length){
+   const q=currentQuizQuestion();if(/^[1-5]$/.test(e.key)&&q&&Number(e.key)<=q.options.length){e.preventDefault();answerQuiz(Number(e.key)-1);}
+   if(e.key==='Enter'&&$('#nextQuestion')){e.preventDefault();$('#nextQuestion').click();}
+  }
+ });
+ if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+}
+
 init();
+initExtras();
